@@ -118,4 +118,20 @@ Set `GROQ_API_KEY` to enable the full AI chatbot. Leave as-is for fallback mode 
 
 ## Model Details
 
-Trained on 7,070 rows of traffic data across 24 Indian locations. Features include hour-of-day, day-of-week, rush hour flags, weather conditions, road type, vehicle density, and cyclic time encoding. The XGBoost classifier uses 300 estimators with max depth 8, achieving 99.86% accuracy on test data.
+Trained on **111,313 rows** across **6 combined datasets** covering 10 Indian cities and 170+ locations. Features include hour-of-day, day-of-week, peak hour flags, weather conditions, road type, vehicle composition (two-wheeler/car/heavy vehicle %), public transport density, visibility, temperature, cyclic time encoding, and vehicle-peak interaction. The XGBoost classifier uses 800 estimators with max depth 12, achieving **98.90% accuracy**.
+
+**Datasets used:**
+- advanced_indian_traffic_dataset (50,000 rows)
+- ai_route_optimization_dataset (30,000 rows)
+- indian_city_traffic_congestion_dataset (15,000 rows)
+- India_Traffic_Dataset_10Cities (10,000 rows)
+- TrafficCongestion_MultiLocation_7000Rows (7,000 rows)
+- traffic_flow_supplement (350 rows)
+
+## What's New
+
+- **Route Drawing** — Click any route in the Route Comparator to draw it on the live map with start/end markers
+- **Smart Time Estimation** — Vehicle count and speed auto-adjust based on time of day (early morning = few vehicles, peak hours = heavy traffic)
+- **Haze & Arterial support** — Weather and road type options expanded to match real Indian conditions
+- **Groq AI Chatbot** — Powered by Llama 3.3 70B for natural traffic conversations
+- **Event Mode** — Toggle congestion spikes for IPL matches, concerts, and events
