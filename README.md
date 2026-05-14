@@ -17,13 +17,15 @@ Real-time traffic congestion prediction for Indian cities using XGBoost (98.9% a
 
 ```bash
 # Terminal 1 - Backend (port 8000)
-cd backend && python main.py
+cd backend
+python main.py
 
 # Terminal 2 - Frontend (port 5173)
-cd frontend && npx vite --host 0.0.0.0 --port 5173
+cd frontend
+npx vite --host 0.0.0.0 --port 5173
 
 # Open in browser
-open http://localhost:5173
+http://localhost:5173
 ```
 
 ---
