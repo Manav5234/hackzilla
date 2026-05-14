@@ -43,6 +43,104 @@ http://localhost:5173
 
 ---
 
+## Architecture
+
+```
+User (Browser) ──► React App (Vite :5173)
+                        │
+                        ▼  fetch() / REST API
+              ┌─────────────────────────┐
+              │   FastAPI Backend (:8000)│
+              │                         │
+              │  ┌───────────────────┐  │
+              │  │  POST /predict    │  │
+              │  │  XGBoost Model    │◄─┤── feature_columns.json
+              │  │  98.9% accuracy   │  │
+              │  └────────┬──────────┘  │
+              │           │             │
+              │  ┌────────▼──────────┐  │
+              │  │  Preprocessing    │  │
+              │  │  43→264 features  │  │
+              │  │  - location one-  │  │
+              │  │    hot encoding   │  │
+              │  │  - time features  │  │
+              │  │  - weather/road   │  │
+              │  │  - vehicle comp.  │  │
+              │  └───────────────────┘  │
+              │                         │
+              │  ┌───────────────────┐  │
+              │  │  GET /heatmap-data │  │
+              │  │  170+ locations   │  │
+              │  │  Dynamic intensity│◄─┤── time + weather modifiers
+              │  └───────────────────┘  │
+              │                         │
+              │  ┌───────────────────┐  │
+              │  │  GET /routes      │  │
+              │  │  OSRM Routing API │──┤── router.project-osrm.org
+              │  │  3 alternatives   │  │
+              │  └───────────────────┘  │
+              │                         │
+              │  ┌───────────────────┐  │
+              │  │  GET /weather     │  │
+              │  │  Open-Meteo API   │──┤── api.open-meteo.com
+              │  │  Live conditions  │  │
+              │  └───────────────────┘  │
+              │                         │
+              │  ┌───────────────────┐  │
+              │  │  POST /chat       │  │
+              │  │  Groq Llama 3.3  │──┤── console.groq.com
+              │  │  or fallback mode │  │
+              │  └───────────────────┘  │
+              └─────────────────────────┘
+```
+
+### Key Logic - How Prediction Works
+
+```
+User Input                          Preprocessing
+─────────────────     ────────────────────────────────
+location: CP         →  location_Connaught Place = 1
+timestamp: 6:30 PM   →  hour=18, is_peak_hour=1, 
+                        hour_sin, hour_cos
+vehicle_count: 320   →  vehicle_count=320,
+                        vehicle_count_x_peak=320
+weather: "Clear"     →  weather_condition_Clear=1
+road_type: "Urban"   →  road_type_Urban=1
+speed_avg: 25        →  speed_avg=25
+rain_mm: 0           →  rain_mm=0
+incident_flag: false →  incident_flag=0
+
+Feature Vector (264 columns) ──► XGBoost ──► [Low%, Med%, High%]
+                                                    │
+                          ┌─────────────────────────┘
+                          ▼
+              congestion_score = Low*10 + Med*50 + High*90
+                          │
+                          ▼
+              location_multiplier (historical traffic volume)
+                          │
+                          ▼
+              event_boost (if active: +25%)
+                          │
+                          ▼
+              Final score (0-100) + risk label + top zones
+```
+
+### Case Handling
+
+| Scenario | Logic |
+|----------|-------|
+| **1 AM, Fog** | hour=1, is_peak=0, peak_mult=0.4 → 10-15 vehicles auto-estimated → Low congestion |
+| **9 AM Peak, Clear** | hour=9, is_peak=1, peak_mult=1.4 → 350 vehicles auto-estimated → High congestion |
+| **Rain detected** | rain_mm > 5 adds +25% to congestion, 30% speed reduction |
+| **Accident reported** | incident_flag adds +25% congestion, 50% speed cut |
+| **Event active** | +25 boost applied, event mode banner shown |
+| **Route congestion** | Route A/B/C color-coded (green/yellow/red) by duration-based estimation |
+| **Unknown location** | multiplier defaults to 1.0 (no adjustment) |
+| **Missing weather** | fallback to Open-Meteo, if that fails: 28C Clear default |
+
+---
+
 ## Tech Stack
 
 **Backend**
