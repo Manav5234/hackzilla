@@ -12,6 +12,7 @@ function App() {
   const [heatmapData, setHeatmapData] = useState([]);
   const [selectedCity, setSelectedCity] = useState(null);
   const [eventActive, setEventActive] = useState(false);
+  const [routeCoords, setRouteCoords] = useState(null);
 
   useEffect(() => {
     getHeatmapData().then(setHeatmapData);
@@ -34,7 +35,7 @@ function App() {
       <div className="main-layout">
         <div className="left-panel">
           <PredictPanel eventActive={eventActive} />
-          <RouteComparator />
+          <RouteComparator onRouteSelect={setRouteCoords} />
           <EventSpike eventActive={eventActive} onToggle={() => setEventActive(!eventActive)} />
         </div>
 
@@ -43,6 +44,7 @@ function App() {
             heatmapData={heatmapData}
             selectedCity={selectedCity}
             onCityClick={handleCityClick}
+            routeCoords={routeCoords}
           />
         </div>
       </div>

@@ -31,12 +31,12 @@ app.add_middleware(
 model = None
 feature_columns = None
 city_coords = {}
+location_multiplier = {}
 
 def load_model():
-    global model, feature_columns, city_coords
+    global model, feature_columns, city_coords, location_multiplier
     model_path = os.path.join(MODEL_DIR, 'xgb_traffic_model.pkl')
     feat_path = os.path.join(MODEL_DIR, 'feature_columns.json')
-    data_path = os.path.join(DATA_DIR, 'TrafficCongestion_MultiLocation_7000Rows.xlsx')
 
     if os.path.exists(model_path):
         model = joblib.load(model_path)
@@ -44,14 +44,30 @@ def load_model():
         with open(feat_path) as f:
             feature_columns = json.load(f)
 
-    if os.path.exists(data_path):
-        try:
-            df = pd.read_excel(data_path, engine='openpyxl')
-            unique_locs = df[['Location', 'Latitude', 'Longitude']].drop_duplicates()
-            for _, row in unique_locs.iterrows():
-                city_coords[row['Location']] = {'lat': float(row['Latitude']), 'lon': float(row['Longitude'])}
-        except Exception:
-            pass
+    # Load location data from best available dataset
+    for candidate in ['advanced_indian_traffic_dataset_50000.csv', 'indian_city_traffic_congestion_dataset_15000.csv', 'India_Traffic_Dataset_10Cities_10000Rows.xlsx']:
+        data_path = os.path.join(DATA_DIR, candidate)
+        if os.path.exists(data_path):
+            try:
+                df = pd.read_csv(data_path) if candidate.endswith('.csv') else pd.read_excel(data_path, engine='openpyxl')
+                df.columns = df.columns.str.strip()
+                loc_col = 'Location' if 'Location' in df.columns else 'location'
+                lat_col = 'Latitude' if 'Latitude' in df.columns else 'latitude'
+                lon_col = 'Longitude' if 'Longitude' in df.columns else 'longitude'
+                if loc_col in df and lat_col in df and lon_col in df:
+                    unique_locs = df[[loc_col, lat_col, lon_col]].drop_duplicates()
+                    for _, row in unique_locs.iterrows():
+                        city_coords[str(row[loc_col]).strip()] = {'lat': float(row[lat_col]), 'lon': float(row[lon_col])}
+                    vol_col = 'Vehicle Count' if 'Vehicle Count' in df.columns else 'vehicle_count' if 'vehicle_count' in df.columns else 'Traffic Volume' if 'Traffic Volume' in df.columns else None
+                    if vol_col and vol_col in df.columns:
+                        vols = df.groupby(loc_col)[vol_col].mean()
+                        min_v, max_v = vols.min(), vols.max()
+                        for loc, v in vols.items():
+                            norm = (v - min_v) / (max_v - min_v) if max_v > min_v else 0.5
+                            location_multiplier[loc.strip()] = round(0.80 + norm * 0.45, 3)
+                break
+            except Exception:
+                continue
 
 load_model()
 
@@ -119,6 +135,11 @@ class PredictRequest(BaseModel):
     rain_mm: float = 0.0
     incident_flag: bool = False
     event_active: bool = False
+    temperature_c: float = 30.0
+    visibility_km: float = 10.0
+    two_wheelers_pct: float = 30.0
+    cars_pct: float = 50.0
+    heavy_vehicles_pct: float = 20.0
 
 class ChatRequest(BaseModel):
     user_message: str
@@ -131,15 +152,17 @@ class RouteRequest(BaseModel):
 
 
 def preprocess_input(location, timestamp, vehicle_count, weather, road_type,
-                     speed_avg=40.0, rain_mm=0.0, incident_flag=False, event_active=False):
+                     speed_avg=40.0, rain_mm=0.0, incident_flag=False, event_active=False,
+                     temperature_c=30.0, visibility_km=10.0,
+                     two_wheelers_pct=30.0, cars_pct=50.0, heavy_vehicles_pct=20.0):
     ts = pd.to_datetime(timestamp)
     hour = ts.hour
     day = ts.dayofweek
     weekend = 1 if day >= 5 else 0
-    rush = 1 if (8 <= hour <= 10) or (17 <= hour <= 19) else 0
+    peak = 1 if (8 <= hour <= 10) or (17 <= hour <= 19) else 0
     sin_h = math.sin(2 * math.pi * hour / 24)
     cos_h = math.cos(2 * math.pi * hour / 24)
-    vc_x_rush = vehicle_count * rush
+    vc_x_peak = vehicle_count * peak
 
     row = {}
     for col in feature_columns:
@@ -154,10 +177,14 @@ def preprocess_input(location, timestamp, vehicle_count, weather, road_type,
     row['hour_of_day'] = hour
     row['day_of_week'] = day
     row['is_weekend'] = weekend
-    row['is_rush_hour'] = rush
+    row['is_peak_hour'] = peak
     row['hour_sin'] = sin_h
     row['hour_cos'] = cos_h
-    row['vehicle_count_x_rush'] = vc_x_rush
+    row['vehicle_count_x_peak'] = vc_x_peak
+    row['two_wheelers_pct'] = two_wheelers_pct
+    row['cars_pct'] = cars_pct
+    row['heavy_vehicles_pct'] = heavy_vehicles_pct
+    row['visibility_km'] = visibility_km
 
     w_col = f'weather_condition_{weather}'
     if w_col in row:
@@ -206,6 +233,11 @@ def predict(req: PredictRequest):
             rain_mm=req.rain_mm,
             incident_flag=req.incident_flag,
             event_active=req.event_active,
+            temperature_c=req.temperature_c,
+            visibility_km=req.visibility_km,
+            two_wheelers_pct=req.two_wheelers_pct,
+            cars_pct=req.cars_pct,
+            heavy_vehicles_pct=req.heavy_vehicles_pct,
         )
         proba = model.predict_proba(features)
         pred = model.predict(features)[0]
@@ -213,6 +245,10 @@ def predict(req: PredictRequest):
         label_map = {0: 'Low', 1: 'Medium', 2: 'High'}
         risk_label = label_map[int(pred)]
         score = congestion_score_from_proba(proba)
+
+        mult = location_multiplier.get(req.location, 1.0)
+        score = round(score * mult, 1)
+        score = max(0, min(100, score))
 
         if req.event_active:
             score = min(100, score + 25)
@@ -244,28 +280,53 @@ def predict(req: PredictRequest):
 @app.get("/heatmap-data")
 def heatmap_data():
     try:
-        data_path = os.path.join(DATA_DIR, 'TrafficCongestion_MultiLocation_7000Rows.xlsx')
+        # Try datasets in priority order
+        data_path = None
+        is_csv = False
+        for c in ['advanced_indian_traffic_dataset_50000.csv', 'indian_city_traffic_congestion_dataset_15000.csv', 'India_Traffic_Dataset_10Cities_10000Rows.xlsx']:
+            p = os.path.join(DATA_DIR, c)
+            if os.path.exists(p):
+                data_path = p
+                is_csv = c.endswith('.csv')
+                break
+
         results = []
-        if os.path.exists(data_path) and model is not None:
-            df = pd.read_excel(data_path, engine='openpyxl')
-            df_sample = df.groupby('Location').agg({
-                'Latitude': 'first', 'Longitude': 'first',
-                'Traffic Volume': 'mean', 'Avg Speed (km/h)': 'mean',
-                'Weather': lambda x: x.mode().iloc[0] if not x.mode().empty else 'Clear',
-                'Congestion Level': lambda x: x.mode().iloc[0] if not x.mode().empty else 'Low'
-            }).reset_index()
+        if data_path and model is not None:
+            df = pd.read_csv(data_path) if is_csv else pd.read_excel(data_path, engine='openpyxl')
+            df.columns = df.columns.str.strip()
+
+            loc_c = 'Location' if 'Location' in df.columns else 'location'
+            lat_c = 'Latitude' if 'Latitude' in df.columns else 'latitude'
+            lon_c = 'Longitude' if 'Longitude' in df.columns else 'longitude'
+            vol_c = 'Vehicle Count' if 'Vehicle Count' in df.columns else 'vehicle_count' if 'vehicle_count' in df.columns else 'Traffic Volume'
+            speed_c = 'Avg Speed (km/h)' if 'Avg Speed (km/h)' in df.columns else 'speed_avg'
+            weather_c = 'Weather' if 'Weather' in df.columns else 'weather_condition'
+            cong_c = 'Congestion Level' if 'Congestion Level' in df.columns else 'congestion_level'
+
+            agg_map = {}
+            if lat_c in df: agg_map[lat_c] = 'first'
+            if lon_c in df: agg_map[lon_c] = 'first'
+            if vol_c in df: agg_map[vol_c] = 'mean'
+            if speed_c in df: agg_map[speed_c] = 'mean'
+            if weather_c in df: agg_map[weather_c] = lambda x: x.mode().iloc[0] if not x.mode().empty else 'Clear'
+            if cong_c in df: agg_map[cong_c] = lambda x: x.mode().iloc[0] if not x.mode().empty else 'Low'
+
+            if not agg_map or loc_c not in df:
+                return {'data': _mock_heatmap(), 'count': len(HEATMAP_POINTS), 'error': 'missing columns'}
+
+            df_sample = df.groupby(loc_c).agg(agg_map).reset_index()
             congestion_scores = {'Low': 25, 'Medium': 55, 'High': 80, 'Very High': 95}
             for _, row in df_sample.iterrows():
-                intensity = congestion_scores.get(row['Congestion Level'], 50)
+                intensity = congestion_scores.get(str(row.get(cong_c, 'Low')).strip(), 50)
                 intensity += random.uniform(-5, 5)
                 intensity = max(0, min(100, intensity))
                 results.append({
-                    'lat': float(row['Latitude']),
-                    'lon': float(row['Longitude']),
+                    'lat': float(row[lat_c]) if lat_c in row else 0,
+                    'lon': float(row[lon_c]) if lon_c in row else 0,
                     'intensity': round(intensity, 1),
-                    'name': row['Location'],
-                    'traffic_volume': int(row['Traffic Volume']),
-                    'speed_avg': float(row['Avg Speed (km/h)']),
+                    'name': str(row[loc_c]).strip(),
+                    'traffic_volume': int(row[vol_c]) if vol_c in row else 0,
+                    'speed_avg': float(row[speed_c]) if speed_c in row else 0,
                 })
         if not results:
             np.random.seed(42)

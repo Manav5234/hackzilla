@@ -19,17 +19,29 @@ const CITIES = [
   { name: 'Park Street Kolkata', lat: 22.5595, lon: 88.3532 },
 ];
 
-export default function RouteComparator() {
+export default function RouteComparator({ onRouteSelect }) {
   const [origin, setOrigin] = useState(CITIES[0]);
   const [dest, setDest] = useState(CITIES[3]);
   const [routes, setRoutes] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(null);
+  const [isVisible, setIsVisible] = useState(false);
 
   const handleCompare = async () => {
     setLoading(true);
+    setActiveIndex(null);
+    if (onRouteSelect) onRouteSelect(null);
     const res = await getRoutes(origin.lat, origin.lon, dest.lat, dest.lon);
     setRoutes(res);
+    setIsVisible(true);
     setLoading(false);
+  };
+
+  const handleRouteClick = (route, index) => {
+    setActiveIndex(index);
+    if (onRouteSelect && route.coordinates && route.coordinates.length > 0) {
+      onRouteSelect({ coordinates: route.coordinates, color: route.color_code, label: route.label });
+    }
   };
 
   return (
@@ -43,7 +55,7 @@ export default function RouteComparator() {
         <label>Origin</label>
         <select value={origin.name} onChange={e => {
           const c = CITIES.find(x => x.name === e.target.value);
-          if (c) setOrigin(c);
+          if (c) { setOrigin(c); if (onRouteSelect) onRouteSelect(null); setActiveIndex(null); }
         }}>
           {CITIES.map(c => <option key={c.name}>{c.name}</option>)}
         </select>
@@ -53,7 +65,7 @@ export default function RouteComparator() {
         <label>Destination</label>
         <select value={dest.name} onChange={e => {
           const c = CITIES.find(x => x.name === e.target.value);
-          if (c) setDest(c);
+          if (c) { setDest(c); if (onRouteSelect) onRouteSelect(null); setActiveIndex(null); }
         }}>
           {CITIES.map(c => <option key={c.name}>{c.name}</option>)}
         </select>
@@ -63,10 +75,19 @@ export default function RouteComparator() {
         {loading ? 'Finding Routes...' : 'Compare Routes'}
       </button>
 
-      {routes && (
+      {routes && isVisible && (
         <div className="routes-container">
           {routes.map((route, i) => (
-            <div key={i} className="route-card" style={{ borderLeftColor: route.color_code }}>
+            <div
+              key={i}
+              className={`route-card ${activeIndex === i ? 'route-active' : ''}`}
+              style={{
+                borderLeftColor: route.color_code,
+                cursor: 'pointer',
+                opacity: activeIndex !== null && activeIndex !== i ? 0.5 : 1,
+              }}
+              onClick={() => handleRouteClick(route, i)}
+            >
               <div className="route-header">
                 <span className="route-label">{route.label}</span>
                 {route.label.includes('AI') && <span className="ai-badge">AI</span>}

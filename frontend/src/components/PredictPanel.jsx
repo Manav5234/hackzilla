@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { predict } from '../services/api';
 
 const LOCATIONS = [
@@ -10,17 +10,44 @@ const LOCATIONS = [
   'Marine Drive Mumbai', 'Koramangala Bangalore', 'Electronic City Bangalore',
   'T Nagar Chennai', 'Park Street Kolkata', 'MG Road Bangalore',
 ];
-const WEATHERS = ['Clear', 'Cloudy', 'Rain', 'Fog', 'Storm'];
-const ROAD_TYPES = ['Urban', 'Highway', 'Residential'];
+const WEATHERS = ['Clear', 'Cloudy', 'Rain', 'Fog', 'Haze'];
+const ROAD_TYPES = ['Urban', 'Highway', 'Residential', 'Arterial'];
+
+function estimateVehiclesFromTime(timeStr) {
+  const h = +timeStr.split(':')[0];
+  if (h >= 0 && h <= 5) return 15;
+  if (h >= 6 && h <= 7) return 80;
+  if (h >= 8 && h <= 10) return 350;
+  if (h >= 11 && h <= 16) return 200;
+  if (h >= 17 && h <= 19) return 400;
+  if (h >= 20 && h <= 22) return 150;
+  return 50;
+}
+
+function estimateSpeedFromTime(timeStr, count) {
+  const h = +timeStr.split(':')[0];
+  if (h >= 0 && h <= 5) return 65;
+  if (count > 350) return 20;
+  if (count > 200) return 35;
+  if ((h >= 8 && h <= 10) || (h >= 17 && h <= 19)) return 30;
+  return 50;
+}
+
+function estimateRain(weather) {
+  return weather === 'Rain' || weather === 'Storm' ? 15 : weather === 'Fog' ? 5 : 0;
+}
 
 export default function PredictPanel({ eventActive }) {
   const [location, setLocation] = useState('Connaught Place');
   const [weather, setWeather] = useState('Clear');
   const [roadType, setRoadType] = useState('Urban');
-  const [vehicleCount, setVehicleCount] = useState(200);
   const [time, setTime] = useState(new Date().toTimeString().slice(0, 5));
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  const autoVehicleCount = useMemo(() => estimateVehiclesFromTime(time), [time]);
+  const autoSpeedAvg = useMemo(() => estimateSpeedFromTime(time, autoVehicleCount), [time, autoVehicleCount]);
+  const autoRain = useMemo(() => estimateRain(weather), [weather]);
 
   const handleSubmit = async () => {
     setLoading(true);
@@ -30,11 +57,11 @@ export default function PredictPanel({ eventActive }) {
     const data = {
       location,
       timestamp: now.toISOString().slice(0, 19).replace('T', ' '),
-      vehicle_count: vehicleCount,
+      vehicle_count: autoVehicleCount,
       weather,
       road_type: roadType,
-      speed_avg: vehicleCount > 350 ? 20 : vehicleCount > 200 ? 35 : 50,
-      rain_mm: weather === 'Rain' || weather === 'Storm' ? 15 : 0,
+      speed_avg: autoSpeedAvg,
+      rain_mm: autoRain,
       incident_flag: false,
       event_active: eventActive,
     };
@@ -72,12 +99,8 @@ export default function PredictPanel({ eventActive }) {
       </div>
 
       <div className="form-group">
-        <label>Vehicle Count: <strong>{vehicleCount}</strong></label>
-        <input
-          type="range" min="0" max="500" step="10"
-          value={vehicleCount} onChange={e => setVehicleCount(+e.target.value)}
-        />
-        <div className="range-labels"><span>0</span><span>500</span></div>
+        <label>Est. Vehicles: <strong>{autoVehicleCount}</strong></label>
+        <div className="range-labels"><span>Auto-calculated from time</span></div>
       </div>
 
       <div className="form-group">

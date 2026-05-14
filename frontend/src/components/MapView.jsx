@@ -10,10 +10,12 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
-export default function MapView({ heatmapData, selectedCity, onCityClick }) {
+export default function MapView({ heatmapData, selectedCity, onCityClick, routeCoords }) {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const heatLayer = useRef(null);
+  const routeLayer = useRef(null);
+  const routeMarkers = useRef(null);
 
   useEffect(() => {
     if (mapInstance.current) return;
@@ -74,6 +76,32 @@ export default function MapView({ heatmapData, selectedCity, onCityClick }) {
       mapInstance.current.setView([found.lat, found.lon], 13);
     }
   }, [selectedCity, heatmapData]);
+
+  useEffect(() => {
+    const map = mapInstance.current;
+    if (!map) return;
+
+    if (routeLayer.current) { map.removeLayer(routeLayer.current); routeLayer.current = null; }
+    if (routeMarkers.current) { routeMarkers.current.forEach(m => map.removeLayer(m)); routeMarkers.current = null; }
+
+    if (!routeCoords || !routeCoords.coordinates || routeCoords.coordinates.length < 2) return;
+
+    const coords = routeCoords.coordinates;
+    const color = routeCoords.color || '#3388ff';
+
+    routeLayer.current = L.polyline(coords, {
+      color, weight: 5, opacity: 0.8, dashArray: null,
+    }).addTo(map);
+
+    const startIcon = L.divIcon({ html: '<div style="background:#22c55e;width:12px;height:12px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [12, 12], iconAnchor: [6, 6] });
+    const endIcon = L.divIcon({ html: '<div style="background:#ef4444;width:12px;height:12px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 6px rgba(0,0,0,0.5)"></div>', className: '', iconSize: [12, 12], iconAnchor: [6, 6] });
+
+    const startMarker = L.marker(coords[0], { icon: startIcon }).addTo(map).bindPopup(`<b>Start</b><br/>${routeCoords.label || 'Route'}`);
+    const endMarker = L.marker(coords[coords.length - 1], { icon: endIcon }).addTo(map).bindPopup('<b>Destination</b>');
+    routeMarkers.current = [startMarker, endMarker];
+
+    map.fitBounds(routeLayer.current.getBounds().pad(0.1));
+  }, [routeCoords]);
 
   return <div ref={mapRef} style={{ width: '100%', height: '100%' }} />;
 }

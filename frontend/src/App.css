@@ -269,6 +269,16 @@
   border-top: 1px solid #1a2044;
   border-right: 1px solid #1a2044;
   border-bottom: 1px solid #1a2044;
+  transition: all 0.2s;
+}
+.route-card:hover {
+  border-color: #00ff88;
+  box-shadow: 0 0 8px rgba(0, 255, 136, 0.15);
+}
+.route-active {
+  border-color: #00ff88 !important;
+  background: #141b45 !important;
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.2);
 }
 .route-header {
   display: flex;
